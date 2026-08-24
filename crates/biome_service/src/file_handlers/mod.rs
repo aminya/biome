@@ -52,9 +52,10 @@ use crate::workspace::{
 };
 use biome_analyze::options::JsxRuntime;
 use biome_analyze::{
-    ActionFilter, AnalyzerAction, AnalyzerDiagnostic, AnalyzerOptions, AnalyzerPluginVec,
-    AnalyzerSignal, ControlFlow, FixKind, GroupCategory, Never, PLUGIN_GROUP, Queryable,
-    RegistryVisitor, Rule, RuleCategories, RuleCategory, RuleError, RuleFilter, RuleGroup,
+    ActionCategory, ActionFilter, AnalyzerAction, AnalyzerDiagnostic, AnalyzerOptions,
+    AnalyzerPluginVec, AnalyzerSignal, ControlFlow, FixKind, GroupCategory, Never, PLUGIN_GROUP,
+    Queryable, RegistryVisitor, Rule, RuleCategories, RuleCategory, RuleError, RuleFilter,
+    RuleGroup,
 };
 use biome_configuration::Rules;
 use biome_configuration::analyzer::assist::Actions;
@@ -769,6 +770,25 @@ impl<'a> ProcessFixAll<'a> {
                         pending.push(action);
                     }
                 }
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    pub(crate) fn collect_unused_suppression_fixes<L: biome_rowan::Language>(
+        &mut self,
+        signal: &dyn AnalyzerSignal<L>,
+        pending: &mut Vec<AnalyzerAction<L>>,
+    ) -> ControlFlow<Never> {
+        for action in signal.actions(ActionFilter::rule_fix()) {
+            if action.applicability == Applicability::MaybeIncorrect
+                && matches!(
+                    &action.category,
+                    ActionCategory::QuickFix(category) if category == "suppressions.unused"
+                )
+            {
+                pending.push(action);
             }
         }
 

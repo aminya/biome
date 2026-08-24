@@ -1593,6 +1593,31 @@ pub(crate) fn fix_all(params: FixAllParams) -> Result<Option<FixedFileResult>, W
         }
     }
 
+    if matches!(params.fix_file_mode, FixFileMode::SafeAndUnsafeFixes) {
+        // Unused-suppression diagnostics are produced after rule visitors run,
+        // so they are not included in the fixable-rule pass above.
+        let semantic_model = semantic_model(&tree, SemanticModelOptions::from(&file_source));
+        let services = js_analyzer_services_for_fix(&tree, &semantic_model, &params, file_source);
+        let mut pending_actions = Vec::new();
+
+        let (_, _) = analyze(
+            &tree,
+            filter,
+            &analyzer_options,
+            &params.plugins,
+            services,
+            |signal| process_fix_all.collect_unused_suppression_fixes(signal, &mut pending_actions),
+        );
+
+        let _ = process_fix_all.process_batch_actions(pending_actions, |root| {
+            tree = match AnyJsRoot::cast(root) {
+                Some(tree) => tree,
+                None => return None,
+            };
+            Some(tree.syntax().text_range_with_trivia().len().into())
+        })?;
+    }
+
     // Phase 2: run all rules on the fixed tree for final diagnostics
     if params.collect_final_diagnostics {
         let semantic_model = semantic_model(&tree, SemanticModelOptions::from(&file_source));

@@ -2,6 +2,7 @@
 
 use biome_console::markup;
 use rustc_hash::FxHashSet;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops;
@@ -63,7 +64,7 @@ pub use crate::signals::{
 use crate::suppressions::Suppressions;
 pub use crate::syntax::{Ast, SyntaxVisitor};
 pub use crate::visitor::{NodeVisitor, Visitor, VisitorContext, VisitorFinishContext};
-use biome_diagnostics::{Diagnostic, DiagnosticExt, category};
+use biome_diagnostics::{Applicability, Diagnostic, DiagnosticExt, category};
 use biome_rowan::{
     AstNode, BatchMutation, Direction, Language, SyntaxKind as _, SyntaxToken, TextRange, TextSize,
     TokenAtOffset, TriviaPieceKind,
@@ -144,11 +145,12 @@ where
             parse_suppression_comment,
             mut emit_signal,
             suppression_action,
-            metadata: _,
+            metadata,
         } = self;
 
+        let root = ctx.root.syntax().clone();
         let mut line_index = 0;
-        let mut suppressions = Suppressions::new(self.metadata);
+        let mut suppressions = Suppressions::new(metadata);
 
         for (index, (phase, mut visitors)) in phases.into_iter().enumerate() {
             let runner = PhaseRunner {
@@ -213,16 +215,57 @@ where
             }
         }
 
-        for suppression in suppressions.line_suppressions {
+        let is_inactive_suppression = |suppression: &crate::suppressions::LineSuppression| {
+            if let Some((category, filter)) = suppression.suppressed_rule.as_ref() {
+                return !query_matcher.is_rule_enabled(*category, filter);
+            }
+
+            let categories = [
+                RuleCategory::Syntax,
+                RuleCategory::Lint,
+                RuleCategory::Action,
+                RuleCategory::Transformation,
+            ];
+            let has_category = categories
+                .iter()
+                .any(|category| suppression.suppressed_categories.contains(*category));
+            has_category
+                && !categories.iter().any(|category| {
+                    suppression.suppressed_categories.contains(*category)
+                        && query_matcher.is_category_enabled(*category)
+                })
+        };
+
+        for suppression in &suppressions.line_suppressions {
+            if is_inactive_suppression(suppression) {
+                continue;
+            }
+
             if suppression.did_suppress_signal {
                 continue;
             }
 
-            let signal = DiagnosticSignal::new(|| {
-                if let Some(range) = suppression.already_suppressed {
+            let comment_span = suppression.comment_span;
+            let already_suppressed = suppression.already_suppressed;
+            let has_protected_suppression = suppressions
+                .invalid_suppression_comments
+                .contains(&comment_span)
+                || suppressions.line_suppressions.iter().any(|other| {
+                    if other.comment_span != comment_span {
+                        return false;
+                    }
+
+                    other.did_suppress_signal
+                        || other.already_suppressed.is_some()
+                        || other.suppress_all_plugins
+                        || !other.suppressed_plugins.is_empty()
+                        || is_inactive_suppression(other)
+                });
+            let signal = DiagnosticSignal::new(move || {
+                if let Some(range) = already_suppressed {
                     AnalyzerSuppressionDiagnostic::new(
                         category!("suppressions/unused"),
-                        suppression.comment_span,
+                        comment_span,
                         "Suppression comment has no effect because another suppression comment suppresses the same rule.",
                     ).note(
                         markup! {"This is the suppression comment that was used."}.to_owned(),
@@ -231,9 +274,32 @@ where
                 } else {
                     AnalyzerSuppressionDiagnostic::new(
                         category!("suppressions/unused"),
-                        suppression.comment_span,
+                        comment_span,
                         "Suppression comment has no effect. Remove the suppression or make sure you are suppressing the correct rule.",
                     )
+                }
+            })
+            .with_action({
+                let root = root.clone();
+                let suppression_action = suppression_action.as_ref();
+                move || {
+                    if already_suppressed.is_some() || has_protected_suppression {
+                        return None;
+                    }
+
+                    let mut mutation = BatchMutation::new(root.clone());
+                    if !suppression_action.remove_unused_suppression(&mut mutation, comment_span) {
+                        return None;
+                    }
+
+                    Some(AnalyzerAction {
+                        rule_name: None,
+                        category: ActionCategory::QuickFix(Cow::Borrowed("suppressions.unused")),
+                        applicability: Applicability::MaybeIncorrect,
+                        message: markup!("Remove this suppression.").to_owned(),
+                        mutation,
+                        text_edit: None,
+                    })
                 }
             });
 
@@ -516,6 +582,8 @@ where
             let suppression: AnalyzerSuppression = match result {
                 Ok(kind) => kind,
                 Err(diag) => {
+                    self.suppressions.invalid_suppression_comments.insert(range);
+
                     // Emit the suppression parser diagnostic
                     let signal = DiagnosticSignal::new(move || {
                         let location = diag.location();
@@ -530,6 +598,8 @@ where
 
             let (reason_text, reason_range) = suppression.reason;
             if reason_text == "<explanation>" {
+                self.suppressions.invalid_suppression_comments.insert(range);
+
                 let signal = DiagnosticSignal::new(|| {
                     AnalyzerSuppressionDiagnostic::new(
                         category!("suppressions/incorrect"),
@@ -545,6 +615,8 @@ where
                 range,
                 !self.deny_top_level_suppressions,
             ) {
+                self.suppressions.invalid_suppression_comments.insert(range);
+
                 let signal = DiagnosticSignal::new(|| diagnostic.clone());
                 (self.emit_signal)(&signal)?;
                 continue;

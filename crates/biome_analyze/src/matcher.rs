@@ -17,6 +17,18 @@ use std::{
 pub trait QueryMatcher<L: Language> {
     /// Execute a single query match
     fn match_query(&mut self, params: MatchQueryParams<L>);
+
+    /// Returns whether the analysis run contains rules in a category targeted
+    /// by a suppression.
+    fn is_category_enabled(&self, _category: RuleCategory) -> bool {
+        true
+    }
+
+    /// Returns whether the analysis run contains the rule targeted by a
+    /// suppression.
+    fn is_rule_enabled(&self, _category: RuleCategory, _filter: &RuleFilter) -> bool {
+        true
+    }
 }
 
 /// Parameters provided to [QueryMatcher::match_query] and require to run lint rules
@@ -214,6 +226,14 @@ where
     fn match_query(&mut self, params: MatchQueryParams<L>) {
         (self.func)(&params);
         self.inner.match_query(params);
+    }
+
+    fn is_category_enabled(&self, category: RuleCategory) -> bool {
+        self.inner.is_category_enabled(category)
+    }
+
+    fn is_rule_enabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.inner.is_rule_enabled(category, filter)
     }
 }
 

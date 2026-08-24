@@ -30,7 +30,7 @@ import { mdiSquareOutline } from "@mdi/js";
 # Emitted Messages
 
 ```block
-file.vue:7:1 suppressions/unused ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+file.vue:7:1 suppressions/unused  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   ! Suppression comment has no effect. Remove the suppression or make sure you are suppressing the correct rule.
   
@@ -41,6 +41,10 @@ file.vue:7:1 suppressions/unused ━━━━━━━━━━━━━━━�
     8 │ import { mdiSquareOutline } from "@mdi/js";
     9 │ </script>
   
+  i Unsafe fix: Remove this suppression.
+  
+    3 │ //·biome-ignore·lint/correctness/noUnusedImports:·migrating·to·biome
+      │ --------------------------------------------------------------------
 
 ```
 

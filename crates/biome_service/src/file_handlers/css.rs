@@ -1034,6 +1034,42 @@ pub(crate) fn fix_all(params: FixAllParams) -> Result<Option<FixedFileResult>, W
         }
     }
 
+    if matches!(params.fix_file_mode, FixFileMode::SafeAndUnsafeFixes) {
+        let css_services = CssAnalyzerServices {
+            semantic_model: None,
+            file_source,
+            module_db: {
+                #[cfg(feature = "module_graph")]
+                {
+                    Some(params.module_db.clone())
+                }
+                #[cfg(not(feature = "module_graph"))]
+                {
+                    None
+                }
+            },
+            project_layout: Some(params.project_layout.clone()),
+        };
+        let mut pending_actions = Vec::new();
+
+        let (_, _) = analyze(
+            &tree,
+            filter,
+            &analyzer_options,
+            css_services,
+            &params.plugins,
+            |signal| process_fix_all.collect_unused_suppression_fixes(signal, &mut pending_actions),
+        );
+
+        let _ = process_fix_all.process_batch_actions(pending_actions, |root| {
+            tree = match AnyCssRoot::cast(root) {
+                Some(tree) => tree,
+                None => return None,
+            };
+            Some(tree.syntax().text_range_with_trivia().len().into())
+        })?;
+    }
+
     // Phase 2: all rules for final diagnostics
     if params.collect_final_diagnostics {
         let css_services = CssAnalyzerServices {

@@ -1,7 +1,7 @@
 use crate::SuppressionCommentEmitterPayload;
 use biome_rowan::{
-    BatchMutation, Language, SyntaxToken, TextLen, TextRange, TokenAtOffset, TriviaPiece,
-    TriviaPieceKind,
+    BatchMutation, Direction, Language, SyntaxToken, TextLen, TextRange, TokenAtOffset,
+    TriviaPiece, TriviaPieceKind,
 };
 
 pub trait SuppressionAction {
@@ -105,6 +105,59 @@ pub trait SuppressionAction {
         let new_token = SyntaxToken::new_detached(token.kind(), text.as_str(), new_trivia, [])
             .with_trailing_trivia_pieces(token.trailing_trivia().pieces());
         mutation.replace_token_discard_trivia(token, new_token);
+    }
+
+    /// Removes a single-line comment trivia piece associated with an unused
+    /// suppression.
+    ///
+    /// Returns `false` when the comment cannot be found in the syntax tree or
+    /// contains multiple lines.
+    fn remove_unused_suppression(
+        &self,
+        mutation: &mut BatchMutation<Self::Language>,
+        comment_span: TextRange,
+    ) -> bool {
+        let Some(token) = mutation
+            .root()
+            .preorder_tokens(Direction::Next)
+            .find(|token| {
+                token
+                    .leading_trivia()
+                    .pieces()
+                    .chain(token.trailing_trivia().pieces())
+                    .any(|piece| piece.text_range() == comment_span)
+            })
+        else {
+            return false;
+        };
+
+        let is_multiline_comment = token
+            .leading_trivia()
+            .pieces()
+            .chain(token.trailing_trivia().pieces())
+            .find(|piece| piece.text_range() == comment_span)
+            .is_some_and(|piece| piece.kind() == TriviaPieceKind::MultiLineComment);
+        if is_multiline_comment {
+            return false;
+        }
+
+        let leading_trivia = token
+            .leading_trivia()
+            .pieces()
+            .filter(|piece| piece.text_range() != comment_span)
+            .collect::<Vec<_>>();
+        let trailing_trivia = token
+            .trailing_trivia()
+            .pieces()
+            .filter(|piece| piece.text_range() != comment_span)
+            .collect::<Vec<_>>();
+
+        let new_token = token
+            .with_leading_trivia_pieces(leading_trivia)
+            .with_trailing_trivia_pieces(trailing_trivia);
+        mutation.replace_token_discard_trivia(token, new_token);
+
+        true
     }
 
     /// Returns the whole top level comment, based on the language

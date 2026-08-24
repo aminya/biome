@@ -960,6 +960,35 @@ fn fix_all(params: FixAllParams) -> Result<Option<FixedFileResult>, WorkspaceErr
         }
     }
 
+    if matches!(params.fix_file_mode, FixFileMode::SafeAndUnsafeFixes) {
+        let services = JsonAnalyzeServices {
+            file_source,
+            configuration_provider: params
+                .settings
+                .full_source()
+                .map(|s| s as std::sync::Arc<dyn ExtendedConfigurationProvider>),
+            project_layout: Some(params.project_layout.clone()),
+        };
+        let mut pending_actions = Vec::new();
+
+        let (_, _) = analyze(
+            &tree,
+            filter,
+            &analyzer_options,
+            services,
+            &params.plugins,
+            |signal| process_fix_all.collect_unused_suppression_fixes(signal, &mut pending_actions),
+        );
+
+        let _ = process_fix_all.process_batch_actions(pending_actions, |root| {
+            tree = match JsonRoot::cast(root) {
+                Some(tree) => tree,
+                None => return None,
+            };
+            Some(tree.syntax().text_range_with_trivia().len().into())
+        })?;
+    }
+
     // Phase 2: all rules for final diagnostics
     if params.collect_final_diagnostics {
         let services = JsonAnalyzeServices {

@@ -1,4 +1,4 @@
-use crate::snap_test::SnapshotPayload;
+use crate::snap_test::{SnapshotPayload, assert_file_contents};
 use crate::{FORMATTED, assert_cli_snapshot, run_cli};
 use biome_console::BufferConsole;
 use biome_fs::{FileSystemExt, MemoryFileSystem};
@@ -313,6 +313,333 @@ let bar = 33;",
         console,
         result,
     ));
+}
+
+#[test]
+fn unsafe_write_removes_only_unused_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    fs.insert(
+        file_path.into(),
+        *b"// biome-ignore lint/suspicious/noDebugger: unused
+function read(value) {
+  return value;
+}
+read(1);
+// biome-ignore lint/suspicious/noDebugger: used
+debugger;
+",
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(
+        &fs,
+        file_path,
+        "\nfunction read(value) {\n  return value;\n}\nread(1);\n// biome-ignore lint/suspicious/noDebugger: used\ndebugger;\n",
+    );
+}
+
+#[test]
+fn unsafe_check_removes_unused_suppression_for_non_fixable_rule() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    fs.insert(
+        file_path.into(),
+        *b"// biome-ignore lint/performance/noAwaitInLoops: unused
+const value = 1;
+console.log(value);
+",
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--only=lint/performance/noAwaitInLoops",
+                "--write",
+                "--unsafe",
+                file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, "const value = 1;\nconsole.log(value);\n");
+}
+
+#[test]
+fn unsafe_write_removes_unused_suppression_for_all_analyzer_languages() {
+    for (file_path, selector, content, expected) in [
+        (
+            "file.css",
+            "--only=lint/correctness/noUnknownProperty",
+            "/* biome-ignore lint/correctness/noUnknownProperty: unused */\na { color: red; }\n",
+            "\na { color: red; }\n",
+        ),
+        (
+            "file.html",
+            "--only=lint/a11y/noSvgWithoutTitle",
+            "<!-- biome-ignore lint/a11y/noSvgWithoutTitle: unused -->\n<div></div>\n",
+            "\n<div></div>\n",
+        ),
+        (
+            "file.graphql",
+            "--only=lint/suspicious/noEmptySource",
+            "# biome-ignore lint/suspicious/noEmptySource: unused\nquery Hello { field }\n",
+            "\nquery Hello { field }\n",
+        ),
+        (
+            "file.jsonc",
+            "--only=lint/suspicious/noDuplicateObjectKeys",
+            "// biome-ignore lint/suspicious/noDuplicateObjectKeys: unused\n{\"key\": 1}\n",
+            "\n{\"key\": 1}\n",
+        ),
+    ] {
+        let fs = MemoryFileSystem::default();
+        let mut console = BufferConsole::default();
+        let file_path = Utf8Path::new(file_path);
+        fs.insert(file_path.into(), content.as_bytes());
+
+        let (fs, result) = run_cli(
+            fs,
+            &mut console,
+            Args::from(["lint", selector, "--write", "--unsafe", file_path.as_str()].as_slice()),
+        );
+
+        assert!(result.is_ok(), "{file_path}: run_cli returned {result:?}");
+        assert_file_contents(&fs, file_path, expected);
+    }
+}
+
+#[test]
+fn unsafe_write_keeps_unused_plugin_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/suspicious/noDebugger lint/plugin/noManualZIndex: keep the plugin suppression\nconst value = 1;\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_known_but_disabled_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/security/noSecrets: keep for the security configuration\nconst value = \"ordinary string\";\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_removes_unused_explicitly_enabled_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        Utf8Path::new("biome.json").into(),
+        br#"{
+  "linter": {
+    "rules": {
+      "security": {
+        "noSecrets": "error"
+      }
+    }
+  }
+}"#,
+    );
+
+    let file_path = Utf8Path::new("file.js");
+    fs.insert(
+        file_path.into(),
+        "// biome-ignore lint/security/noSecrets: unused\nconst value = \"ordinary string\";\nconsole.log(value);\n".as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(
+        &fs,
+        file_path,
+        "\nconst value = \"ordinary string\";\nconsole.log(value);\n",
+    );
+}
+
+#[test]
+fn unsafe_write_keeps_inactive_category_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore assist: keep for the assist command\nconst value = 1;\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_malformed_known_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/security/noSecrets\nconst value = \"ordinary string\";\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_err(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_disabled_suppression_in_mixed_comment() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/suspicious/noDebugger lint/security/noSecrets: keep both\nfunction read(value) {\n  return value;\n}\nread(1);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_invalid_suppression_in_mixed_comment() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/suspicious/noDebugger lint/suspicious/notARealRule: keep the invalid entry\nfunction read(value) {\n  return value;\n}\nread(1);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_err(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_suppression_with_invalid_explanation() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/suspicious/noDebugger: <explanation>\nconst value = 1;\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_used_no_secrets_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/security/noSecrets: this is a known false positive\nconst awsApiKey = \"AKIA1234567890EXAMPLE\";\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "lint",
+                "--only=lint/security/noSecrets",
+                "--write",
+                "--unsafe",
+                file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
+}
+
+#[test]
+fn unsafe_write_keeps_used_suppression_in_mixed_comment() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    let file_path = Utf8Path::new("file.js");
+    let content = "// biome-ignore lint/suspicious/noDebugger lint/style/useConst: mixed\nlet value = 1; debugger;\nconsole.log(value);\n";
+    fs.insert(file_path.into(), content.as_bytes());
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["lint", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, content);
 }
 
 #[test]
