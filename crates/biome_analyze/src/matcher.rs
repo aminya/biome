@@ -25,6 +25,24 @@ pub trait QueryMatcher<L: Language> {
         let _ = phase;
         None
     }
+
+    /// Returns whether the analysis run contains rules in a category targeted
+    /// by a suppression.
+    fn is_category_enabled(&self, _category: RuleCategory) -> bool {
+        true
+    }
+
+    /// Returns whether the analysis run contains the rule targeted by a
+    /// suppression.
+    fn is_rule_enabled(&self, _category: RuleCategory, _filter: &RuleFilter) -> bool {
+        true
+    }
+
+    /// Returns whether the analysis filter explicitly disabled the rule
+    /// targeted by a suppression.
+    fn is_rule_disabled(&self, _category: RuleCategory, _filter: &RuleFilter) -> bool {
+        false
+    }
 }
 
 /// Parameters provided to [QueryMatcher::match_query] and require to run lint rules
@@ -230,6 +248,18 @@ where
 
     fn syntax_query_kinds(&self, phase: Phases) -> Option<SyntaxKindSet<L>> {
         self.inner.syntax_query_kinds(phase)
+    }
+
+    fn is_category_enabled(&self, category: RuleCategory) -> bool {
+        self.inner.is_category_enabled(category)
+    }
+
+    fn is_rule_enabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.inner.is_rule_enabled(category, filter)
+    }
+
+    fn is_rule_disabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.inner.is_rule_disabled(category, filter)
     }
 }
 
