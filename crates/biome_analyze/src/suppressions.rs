@@ -422,6 +422,8 @@ pub struct Suppressions<'analyzer> {
     /// Used to track the last suppression pushed.
     last_suppression: Option<AnalyzerSuppressionVariant>,
     pub(crate) line_suppressions: Vec<LineSuppression>,
+    /// Comments that produced a suppression parser diagnostic.
+    pub(crate) invalid_suppression_comments: FxHashSet<TextRange>,
     pub(crate) top_level_suppression: TopLevelSuppression,
     pub(crate) range_suppressions: RangeSuppressions,
 }
@@ -432,6 +434,7 @@ impl<'analyzer> Suppressions<'analyzer> {
             line_index: 0,
             metadata,
             line_suppressions: vec![],
+            invalid_suppression_comments: Default::default(),
             top_level_suppression: TopLevelSuppression::default(),
             range_suppressions: RangeSuppressions::default(),
             last_suppression: None,

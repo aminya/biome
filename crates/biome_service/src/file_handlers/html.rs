@@ -1262,6 +1262,51 @@ pub(crate) fn fix_all(params: FixAllParams) -> Result<Option<FixedFileResult>, W
         }
     }
 
+    if matches!(params.fix_file_mode, FixFileMode::SafeAndUnsafeFixes) {
+        let html_services = HtmlAnalyzerServices {
+            module_db: {
+                #[cfg(feature = "module_graph")]
+                {
+                    Some(params.module_db.clone())
+                }
+                #[cfg(not(feature = "module_graph"))]
+                {
+                    None
+                }
+            },
+            project_layout: Some(params.project_layout.clone()),
+            ..HtmlAnalyzerServices::default()
+        }
+        .with_language_db(params.workspace_db.rc_language_db());
+        #[cfg(feature = "html_embeds")]
+        let html_services = html_services.with_embedded_data(params.embedded_data.clone());
+        let suppression = HtmlSuppressionService::new(
+            &tree,
+            source_type,
+            &params.parsed_source,
+            &params.workspace_db,
+        );
+        let mut pending_actions = Vec::new();
+
+        let (_, _) = analyze(
+            &tree,
+            filter,
+            &analyzer_options,
+            source_type,
+            html_services,
+            Some(Box::new(suppression)),
+            |signal| process_fix_all.collect_unused_suppression_fixes(signal, &mut pending_actions),
+        );
+
+        let _ = process_fix_all.process_batch_actions(pending_actions, |root| {
+            tree = match HtmlRoot::cast(root) {
+                Some(tree) => tree,
+                None => return None,
+            };
+            Some(tree.syntax().text_range_with_trivia().len().into())
+        })?;
+    }
+
     // Phase 2: all rules for final diagnostics
     if params.collect_final_diagnostics {
         let html_services = HtmlAnalyzerServices {

@@ -1,6 +1,6 @@
 use crate::{
-    AddVisitor, AnalysisFilter, GroupCategory, QueryMatcher, Rule, RuleGroup, RuleKey,
-    RuleMetadata, ServiceBag, SignalEntry, Visitor,
+    AddVisitor, AnalysisFilter, GroupCategory, QueryMatcher, Rule, RuleCategory, RuleFilter,
+    RuleGroup, RuleKey, RuleMetadata, ServiceBag, SignalEntry, Visitor,
     context::RuleContext,
     matcher::{GroupKey, MatchQueryParams},
     query::{QueryKey, Queryable},
@@ -99,6 +99,10 @@ impl<L: Language> RegistryVisitor<L> for MetadataRegistry {
 pub struct RuleRegistry<L: Language> {
     /// Holds a collection of rules for each phase.
     phase_rules: [PhaseRules<L>; 2],
+    /// Rules that were selected by the analysis filter for this run.
+    active_rules: FxHashSet<(RuleCategory, RuleKey)>,
+    /// Rules that were explicitly disabled by the analysis filter.
+    disabled_rules: FxHashSet<(RuleCategory, RuleKey)>,
 }
 
 impl<L: Language + Default> RuleRegistry<L> {
@@ -111,6 +115,8 @@ impl<L: Language + Default> RuleRegistry<L> {
             root,
             registry: Self {
                 phase_rules: Default::default(),
+                active_rules: Default::default(),
+                disabled_rules: Default::default(),
             },
             visitors: BTreeMap::default(),
             services: ServiceBag::default(),
@@ -163,9 +169,22 @@ impl<L: Language + Default + 'static> RegistryVisitor<L> for RuleRegistryBuilder
     where
         R: Rule<Options: Default, Query: Queryable<Language = L, Output: Clone>> + 'static,
     {
+        let category = <<R::Group as RuleGroup>::Category as GroupCategory>::CATEGORY;
+        let rule = RuleKey::rule::<R>();
+        if self
+            .filter
+            .disabled_rules
+            .iter()
+            .any(|filter| filter.match_rule::<R>())
+        {
+            self.registry.disabled_rules.insert((category, rule));
+        }
+
         if !self.filter.match_rule::<R>() {
             return;
         }
+
+        self.registry.active_rules.insert((category, rule));
 
         let phase = R::phase() as usize;
         let phase = &mut self.registry.phase_rules[phase];
@@ -293,6 +312,40 @@ impl<L: Language + 'static> QueryMatcher<L> for RuleRegistry<L> {
             // TODO: #3394 track error in the signal queue
             let _ = (rule.run)(&mut params, state);
         }
+    }
+
+    fn is_category_enabled(&self, category: RuleCategory) -> bool {
+        self.active_rules
+            .iter()
+            .any(|(active_category, _)| *active_category == category)
+    }
+
+    fn is_rule_enabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        if matches!(filter, RuleFilter::Group(group) if *group == "lint/plugin") {
+            return true;
+        }
+
+        self.active_rules.iter().any(|(active_category, rule)| {
+            *active_category == category
+                && match filter {
+                    RuleFilter::Group(group) => rule.group() == *group,
+                    RuleFilter::Rule(group, name) => {
+                        rule.group() == *group && rule.rule_name() == *name
+                    }
+                }
+        })
+    }
+
+    fn is_rule_disabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.disabled_rules.iter().any(|(disabled_category, rule)| {
+            *disabled_category == category
+                && match filter {
+                    RuleFilter::Group(group) => rule.group() == *group,
+                    RuleFilter::Rule(group, name) => {
+                        rule.group() == *group && rule.rule_name() == *name
+                    }
+                }
+        })
     }
 }
 
