@@ -217,7 +217,8 @@ where
 
         let is_inactive_suppression = |suppression: &crate::suppressions::LineSuppression| {
             if let Some((category, filter)) = suppression.suppressed_rule.as_ref() {
-                return !query_matcher.is_rule_enabled(*category, filter);
+                return !query_matcher.is_rule_enabled(*category, filter)
+                    && !query_matcher.is_rule_disabled(*category, filter);
             }
 
             let categories = [

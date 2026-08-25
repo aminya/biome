@@ -501,6 +501,46 @@ fn unsafe_write_removes_unused_explicitly_enabled_suppression() {
 }
 
 #[test]
+fn unsafe_write_removes_unused_configured_disabled_suppression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        Utf8Path::new("biome.json").into(),
+        br#"{
+  "overrides": [
+    {
+      "includes": ["**/*.test.js"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noDebugger": "off"
+          }
+        }
+      }
+    }
+  ]
+}"#,
+    );
+
+    let file_path = Utf8Path::new("file.test.js");
+    fs.insert(
+        file_path.into(),
+        "// biome-ignore lint/suspicious/noDebugger: disabled in configuration\nconst value = 1;\n"
+            .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["check", "--write", "--unsafe", file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+    assert_file_contents(&fs, file_path, "const _value = 1;\n");
+}
+
+#[test]
 fn unsafe_write_keeps_inactive_category_suppression() {
     let fs = MemoryFileSystem::default();
     let mut console = BufferConsole::default();

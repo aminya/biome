@@ -29,6 +29,12 @@ pub trait QueryMatcher<L: Language> {
     fn is_rule_enabled(&self, _category: RuleCategory, _filter: &RuleFilter) -> bool {
         true
     }
+
+    /// Returns whether the analysis filter explicitly disabled the rule
+    /// targeted by a suppression.
+    fn is_rule_disabled(&self, _category: RuleCategory, _filter: &RuleFilter) -> bool {
+        false
+    }
 }
 
 /// Parameters provided to [QueryMatcher::match_query] and require to run lint rules
@@ -234,6 +240,10 @@ where
 
     fn is_rule_enabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
         self.inner.is_rule_enabled(category, filter)
+    }
+
+    fn is_rule_disabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.inner.is_rule_disabled(category, filter)
     }
 }
 

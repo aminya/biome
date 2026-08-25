@@ -101,6 +101,8 @@ pub struct RuleRegistry<L: Language> {
     phase_rules: [PhaseRules<L>; 2],
     /// Rules that were selected by the analysis filter for this run.
     active_rules: FxHashSet<(RuleCategory, RuleKey)>,
+    /// Rules that were explicitly disabled by the analysis filter.
+    disabled_rules: FxHashSet<(RuleCategory, RuleKey)>,
 }
 
 impl<L: Language + Default> RuleRegistry<L> {
@@ -114,6 +116,7 @@ impl<L: Language + Default> RuleRegistry<L> {
             registry: Self {
                 phase_rules: Default::default(),
                 active_rules: Default::default(),
+                disabled_rules: Default::default(),
             },
             visitors: BTreeMap::default(),
             services: ServiceBag::default(),
@@ -166,14 +169,22 @@ impl<L: Language + Default + 'static> RegistryVisitor<L> for RuleRegistryBuilder
     where
         R: Rule<Options: Default, Query: Queryable<Language = L, Output: Clone>> + 'static,
     {
+        let category = <<R::Group as RuleGroup>::Category as GroupCategory>::CATEGORY;
+        let rule = RuleKey::rule::<R>();
+        if self
+            .filter
+            .disabled_rules
+            .iter()
+            .any(|filter| filter.match_rule::<R>())
+        {
+            self.registry.disabled_rules.insert((category, rule));
+        }
+
         if !self.filter.match_rule::<R>() {
             return;
         }
 
-        self.registry.active_rules.insert((
-            <<R::Group as RuleGroup>::Category as GroupCategory>::CATEGORY,
-            RuleKey::rule::<R>(),
-        ));
+        self.registry.active_rules.insert((category, rule));
 
         let phase = R::phase() as usize;
         let phase = &mut self.registry.phase_rules[phase];
@@ -309,6 +320,18 @@ impl<L: Language + 'static> QueryMatcher<L> for RuleRegistry<L> {
 
         self.active_rules.iter().any(|(active_category, rule)| {
             *active_category == category
+                && match filter {
+                    RuleFilter::Group(group) => rule.group() == *group,
+                    RuleFilter::Rule(group, name) => {
+                        rule.group() == *group && rule.rule_name() == *name
+                    }
+                }
+        })
+    }
+
+    fn is_rule_disabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
+        self.disabled_rules.iter().any(|(disabled_category, rule)| {
+            *disabled_category == category
                 && match filter {
                     RuleFilter::Group(group) => rule.group() == *group,
                     RuleFilter::Rule(group, name) => {
