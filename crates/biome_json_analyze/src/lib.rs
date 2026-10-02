@@ -17,7 +17,7 @@ pub use biome_analyze::ExtendedConfigurationProvider;
 use biome_analyze::{
     AnalysisFilter, AnalyzerOptions, AnalyzerPluginSlice, AnalyzerSignal, BatchPluginVisitor,
     ControlFlow, EmbeddedSignalInspector, LanguageRoot, MatchQueryParams, MetadataRegistry, Phases,
-    PluginTargetLanguage, RuleAction, RuleRegistry,
+    PluginTargetLanguage, RuleAction, RuleCategory, RuleRegistry,
 };
 use biome_diagnostics::Error;
 use biome_json_syntax::JsonLanguage;
@@ -163,7 +163,17 @@ where
     let mut registry = RuleRegistry::builder(&filter, root);
     visit_registry(&mut registry);
 
-    let (registry, mut services, diagnostics, visitors) = registry.build();
+    let (mut registry, mut services, diagnostics, visitors) = registry.build();
+
+    let json_plugins: Vec<_> = plugins
+        .iter()
+        .filter(|p| p.language() == PluginTargetLanguage::Json)
+        .cloned()
+        .collect();
+    let has_plugin_visitor = filter.match_plugins() && !json_plugins.is_empty();
+    if has_plugin_visitor {
+        registry.enable_category(RuleCategory::Lint);
+    }
 
     // Bail if we can't parse a rule option
     if !diagnostics.is_empty() {
@@ -182,13 +192,7 @@ where
         analyzer.add_visitor(phase, visitor);
     }
 
-    let json_plugins: Vec<_> = plugins
-        .iter()
-        .filter(|p| p.language() == PluginTargetLanguage::Json)
-        .cloned()
-        .collect();
-
-    if filter.match_plugins() && !json_plugins.is_empty() {
+    if has_plugin_visitor {
         // SAFETY: All plugins have been verified to target JSON above.
         unsafe {
             analyzer.add_visitor(
