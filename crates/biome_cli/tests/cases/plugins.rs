@@ -109,6 +109,82 @@ fn local_manifest_export_name_can_be_suppressed() {
 }
 
 #[test]
+fn plugin_only_run_reports_unused_category_wide_lint_suppression() {
+    let mut fs = TemporaryFs::new("plugin_only_run_reports_unused_category_wide_lint_suppression");
+
+    fs.create_file(
+        "biome.json",
+        r#"{
+    "plugins": ["./plugin"],
+    "linter": { "rules": { "preset": "none" } }
+}"#,
+    );
+    fs.create_file(
+        "plugin/biome-manifest.json",
+        r#"{
+    "version": 1,
+    "plugins": { "rules": [{ "noAssign": "rules/assign.grit" }] }
+}"#,
+    );
+    fs.create_file(
+        "plugin/rules/assign.grit",
+        r#"`Object.assign($args)` where {
+    register_diagnostic(span = $args, message = "Prefer object spread")
+}"#,
+    );
+    fs.create_file(
+        "test.js",
+        "// biome-ignore lint: no plugin rule applies to this statement\nconst value = 1;\n",
+    );
+
+    let mut console = BufferConsole::default();
+    let result = run_cli_with_dyn_fs(
+        Box::new(fs.create_os()),
+        &mut console,
+        Args::from(["lint", &format!("{}/test.js", fs.cli_path())].as_slice()),
+    );
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "plugin_only_run_reports_unused_category_wide_lint_suppression",
+        fs.create_mem(),
+        console,
+        result,
+    ));
+}
+
+#[test]
+fn category_wide_lint_suppression_is_inactive_without_plugins() {
+    let mut fs = TemporaryFs::new("category_wide_lint_suppression_is_inactive_without_plugins");
+
+    fs.create_file(
+        "biome.json",
+        r#"{
+    "linter": { "rules": { "preset": "none" } }
+}"#,
+    );
+    fs.create_file(
+        "test.js",
+        "// biome-ignore lint: no lint rules are enabled\nconst value = 1;\n",
+    );
+
+    let mut console = BufferConsole::default();
+    let result = run_cli_with_dyn_fs(
+        Box::new(fs.create_os()),
+        &mut console,
+        Args::from(["lint", &format!("{}/test.js", fs.cli_path())].as_slice()),
+    );
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "category_wide_lint_suppression_is_inactive_without_plugins",
+        fs.create_mem(),
+        console,
+        result,
+    ));
+}
+
+#[test]
 fn package_manifest_preset_is_loaded_once() {
     let mut fs = TemporaryFs::new("package_manifest_preset_is_loaded_once");
 

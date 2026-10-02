@@ -19,7 +19,7 @@ use crate::suppression_action::CssSuppressionAction;
 use biome_analyze::{
     AddVisitor, AnalysisFilter, AnalyzerOptions, AnalyzerPluginSlice, AnalyzerSignal,
     BatchPluginVisitor, ControlFlow, LanguageRoot, MatchQueryParams, MetadataRegistry, Phases,
-    PluginTargetLanguage, RuleAction, RuleRegistry,
+    PluginTargetLanguage, RuleAction, RuleCategory, RuleRegistry,
 };
 use biome_css_syntax::CssLanguage;
 use biome_db::AnyParsedSource;
@@ -145,13 +145,17 @@ where
     let mut registry = RuleRegistry::builder(&filter, root);
     visit_registry(&mut registry);
 
-    let (registry, mut services, diagnostics, mut visitors) = registry.build();
+    let (mut registry, mut services, diagnostics, mut visitors) = registry.build();
 
     let css_plugins: Vec<_> = plugins
         .iter()
         .filter(|p| p.language() == PluginTargetLanguage::Css)
         .cloned()
         .collect();
+    let has_plugin_visitor = filter.match_plugins() && !css_plugins.is_empty();
+    if has_plugin_visitor {
+        registry.enable_category(RuleCategory::Lint);
+    }
     if filter.match_plugins()
         && css_plugins.iter().any(|plugin| {
             plugin.requires_semantic_model() && plugin.applies_to_file(&options.file_path)
@@ -191,7 +195,7 @@ where
         analyzer.add_visitor(phase, visitor);
     }
 
-    if filter.match_plugins() && !css_plugins.is_empty() {
+    if has_plugin_visitor {
         // SAFETY: All plugins have been verified to target CSS above.
         unsafe {
             analyzer.add_visitor(

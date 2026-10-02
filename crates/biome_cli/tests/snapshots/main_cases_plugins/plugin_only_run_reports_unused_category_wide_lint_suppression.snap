@@ -1,0 +1,61 @@
+---
+source: crates/biome_cli/tests/snap_test.rs
+expression: redactor(content)
+---
+## `biome.json`
+
+```json
+{
+  "plugins": ["./plugin"],
+  "linter": { "rules": { "preset": "none" } }
+}
+```
+
+## `plugin/biome-manifest.json`
+
+```json
+{
+    "version": 1,
+    "plugins": { "rules": [{ "noAssign": "rules/assign.grit" }] }
+}
+```
+
+## `plugin/rules/assign.grit`
+
+```grit
+`Object.assign($args)` where {
+    register_diagnostic(span = $args, message = "Prefer object spread")
+}
+```
+
+## `test.js`
+
+```js
+// biome-ignore lint: no plugin rule applies to this statement
+const value = 1;
+
+```
+
+# Emitted Messages
+
+```block
+test.js:1:1 suppressions/unused  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Suppression comment has no effect. Remove the suppression or make sure you are suppressing the correct rule.
+  
+  > 1 │ // biome-ignore lint: no plugin rule applies to this statement
+      │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    2 │ const value = 1;
+    3 │ 
+  
+  i Unsafe fix: Remove this suppression.
+  
+    1 │ //·biome-ignore·lint:·no·plugin·rule·applies·to·this·statement
+      │ --------------------------------------------------------------
+
+```
+
+```block
+Checked 1 file in <TIME>. No fixes applied.
+Found 1 warning.
+```

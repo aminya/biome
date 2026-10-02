@@ -16,7 +16,8 @@ use crate::suppression_action::JsSuppressionAction;
 use biome_analyze::{
     AddVisitor, AnalysisFilter, Analyzer, AnalyzerContext, AnalyzerOptions, AnalyzerPluginSlice,
     AnalyzerSignal, BatchPluginVisitor, ControlFlow, InspectMatcher, LanguageRoot,
-    MatchQueryParams, MetadataRegistry, Phases, PluginTargetLanguage, RuleAction, RuleRegistry,
+    MatchQueryParams, MetadataRegistry, Phases, PluginTargetLanguage, RuleAction, RuleCategory,
+    RuleRegistry,
 };
 use biome_aria::AriaRoles;
 use biome_db::AnyParsedSource;
@@ -163,13 +164,17 @@ where
         source_type,
     } = services;
 
-    let (registry, mut services, diagnostics, mut visitors) = registry.build();
+    let (mut registry, mut services, diagnostics, mut visitors) = registry.build();
 
     let plugins: Vec<_> = plugins
         .iter()
         .filter(|p| p.language() == PluginTargetLanguage::JavaScript)
         .cloned()
         .collect();
+    let has_plugin_visitor = filter.match_plugins() && !plugins.is_empty();
+    if has_plugin_visitor {
+        registry.enable_category(RuleCategory::Lint);
+    }
     if filter.match_plugins()
         && plugins.iter().any(|plugin| {
             plugin.requires_semantic_model() && plugin.applies_to_file(&options.file_path)
@@ -195,7 +200,7 @@ where
         analyzer.add_visitor(phase, visitor);
     }
 
-    if filter.match_plugins() && !plugins.is_empty() {
+    if has_plugin_visitor {
         // SAFETY: All plugins have been verified to target JavaScript above.
         unsafe {
             analyzer.add_visitor(

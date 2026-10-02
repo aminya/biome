@@ -99,6 +99,8 @@ impl<L: Language> RegistryVisitor<L> for MetadataRegistry {
 pub struct RuleRegistry<L: Language> {
     /// Holds a collection of rules for each phase.
     phase_rules: [PhaseRules<L>; 2],
+    /// Categories enabled by visitors that are not registered as native rules.
+    active_categories: FxHashSet<RuleCategory>,
     /// Rules that were selected by the analysis filter for this run.
     active_rules: FxHashSet<(RuleCategory, RuleKey)>,
     /// Rules that were explicitly disabled by the analysis filter.
@@ -115,6 +117,7 @@ impl<L: Language + Default> RuleRegistry<L> {
             root,
             registry: Self {
                 phase_rules: Default::default(),
+                active_categories: Default::default(),
                 active_rules: Default::default(),
                 disabled_rules: Default::default(),
             },
@@ -122,6 +125,11 @@ impl<L: Language + Default> RuleRegistry<L> {
             services: ServiceBag::default(),
             diagnostics: Vec::new(),
         }
+    }
+
+    /// Marks a category as enabled when a non-rule visitor can emit diagnostics in it.
+    pub fn enable_category(&mut self, category: RuleCategory) {
+        self.active_categories.insert(category);
     }
 }
 
@@ -315,9 +323,11 @@ impl<L: Language + 'static> QueryMatcher<L> for RuleRegistry<L> {
     }
 
     fn is_category_enabled(&self, category: RuleCategory) -> bool {
-        self.active_rules
-            .iter()
-            .any(|(active_category, _)| *active_category == category)
+        self.active_categories.contains(&category)
+            || self
+                .active_rules
+                .iter()
+                .any(|(active_category, _)| *active_category == category)
     }
 
     fn is_rule_enabled(&self, category: RuleCategory, filter: &RuleFilter) -> bool {
