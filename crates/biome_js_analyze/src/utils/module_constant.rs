@@ -791,7 +791,7 @@ fn is_directive_statement(node: &JsSyntaxNode) -> bool {
         return false;
     };
 
-    statement.expression().ok().is_some_and(|expression| {
+    statement.expression().is_ok_and(|expression| {
         expression
             .as_any_js_literal_expression()
             .is_some_and(|literal| literal.as_js_string_literal_expression().is_some())
@@ -967,8 +967,7 @@ function read(input) {
                 let binding = id.as_any_js_binding()?.as_js_identifier_binding()?;
                 (binding
                     .name_token()
-                    .ok()
-                    .is_some_and(|token| token.text_trimmed() == "REGEX"))
+                    .is_ok_and(|token| token.text_trimmed() == "REGEX"))
                 .then_some(statement)
             })
             .expect("expected REGEX at module scope");
@@ -998,8 +997,7 @@ function read(input) {
                 .any(|reference| {
                     reference
                         .value_token()
-                        .ok()
-                        .is_some_and(|token| token.text_trimmed() == "REGEX")
+                        .is_ok_and(|token| token.text_trimmed() == "REGEX")
                 })
         );
         assert!(
