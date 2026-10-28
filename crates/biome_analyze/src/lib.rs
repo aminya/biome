@@ -1,7 +1,6 @@
 #![deny(clippy::use_self, rustdoc::broken_intra_doc_links)]
 
 use biome_console::markup;
-use rustc_hash::FxHashSet;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::{Debug, Display, Formatter};
